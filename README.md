@@ -1,16 +1,8 @@
-# Codexify 📜
+# Codexify 📜 **Transform your codebases into intelligent, structured context, perfectly optimized for Large Language Models (LLMs).**
 
 <p align="center">
 <img src="assets/imgs/logo.jpg" alt="Logo">
 </p>
-
-
-**Transform your codebases into intelligent, structured context, perfectly optimized for Large Language Models (LLMs).**
-
-[![PyPI version](https://badge.fury.io/py/codexify.svg)](https://badge.fury.io/py/codexify) <!-- Replace with your actual badge once published -->
-[![Python Version](https://img.shields.io/pypi/pyversions/codexify.svg)](https://pypi.org/project/codexify/) <!-- Replace -->
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-<!-- Add other relevant badges: build status, coverage, etc. -->
 
 Codexify is a powerful and flexible Python tool, available as both a Command Line Interface (CLI) and an importable module. It's designed to analyze complex project trees, intelligently filter files, and aggregate their relevant content into a single text output. This output is ideal for providing rich, organized context to LLMs, significantly enhancing their ability to understand, analyze, or generate code.
 
@@ -18,7 +10,7 @@ Codexify is a powerful and flexible Python tool, available as both a Command Lin
 
 ## Table of Contents
 
-- [Codexify 📜](#codexify-)
+- [Codexify 📜 **Transform your codebases into intelligent, structured context, perfectly optimized for Large Language Models (LLMs).**](#codexify--transform-your-codebases-into-intelligent-structured-context-perfectly-optimized-for-large-language-models-llms)
   - [Table of Contents](#table-of-contents)
   - [🌟 Key Features](#-key-features)
   - [🚀 Installation](#-installation)
