@@ -110,4 +110,5 @@ venv/
 *.seed
 *.pid.lock
 
+
 # --- Ajoutez ici d'autres règles génériques pertinentes ---
