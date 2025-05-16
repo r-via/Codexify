@@ -61,8 +61,6 @@ Ensure you have Python 3.8+ installed.
 
 ### With pip (from PyPI)
 
-Once Codexify is published on PyPI, you can easily install it using pip:
-
 ```bash
 pip install codexify
 ```
@@ -73,7 +71,7 @@ To install the latest development version:
 
 1.  Clone the repository:
     ```bash
-    git clone https://github.com/YOUR_USERNAME/codexify.git
+    git clone https://github.com/r-via/codexify.git
     cd codexify
     ```
 2.  Install the package (using a virtual environment is recommended):
