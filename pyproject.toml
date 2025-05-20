@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [
-  {name = "Your Name", email = "your.email@example.com"},
+  {name = "Rémi Viau", email = "remi.viau@gmail.com"},
 ]
 keywords = ["llm", "codegen", "context", "compiler", "developer-tools", "python", "cli"]
 classifiers = [
@@ -34,8 +34,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/codexify"
-Repository = "https://github.com/yourusername/codexify"
+Homepage = "https://github.com/r-via/codexify"
+Repository = "https://github.com/r-via/codexify"
 
 [project.scripts]
 codexify = "codexify.cli:run_cli"
