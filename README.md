@@ -51,7 +51,6 @@ Codexify is a powerful and flexible Python tool, available as both a Command Lin
     *   Explicit marking (`[Content Omitted]`) for files/directories present but whose content is not included.
 *   **Token Estimation:** Calculates the token count (via `tiktoken` with `cl100k_base` encoding) of the generated output, essential for LLM context planning.
 *   **Modular and Extensible:** Usable as a Python library in your own scripts and workflows.
-*   **Automatic Dependency Management:** Attempts to install missing dependencies (`PyYAML`, `tiktoken`, `gitignore-parser`) on first run.
 
 ---
 

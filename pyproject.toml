@@ -5,29 +5,48 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "codexify"
 version = "0.1.0"
-description = "A code snippet generator for documentation"
+description = "Transform your codebases into intelligent, structured context, perfectly optimized for Large Language Models (LLMs)."
 readme = "README.md"
-requires-python = ">=3.7"
-license = { text = "MIT" }
+requires-python = ">=3.8"
+license = {text = "MIT"}
 authors = [
-  { name = "Rémi Viau", email = "remi.viau@gmail.com" },
+  {name = "Rémi Viau", email = "remi.viau@gmail.com"},
 ]
 dependencies = [
-  "click>=7.0",
-  "requests>=2.25.1",
+  "PyYAML>=5.0",
+  "tiktoken>=0.3.0",
+  "gitignore-parser>=0.1.0",
 ]
-keywords = ["documentation", "code", "snippets"]
+keywords = [
+    "llm",
+    "context",
+    "code analysis",
+    "developer tools",
+    "cli",
+    "python",
+    "code generation",
+    "text processing"
+]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.7",
   "Programming Language :: Python :: 3.8",
   "Programming Language :: Python :: 3.9",
-  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Software Development :: Build Tools",
+  "Topic :: Text Processing :: Indexing",
 ]
+
+[project.urls]
+Homepage = "https://github.com/r-via/codexify"
+Repository = "https://github.com/r-via/codexify"
 
 [project.scripts]
 codexify = "codexify.cli:run_cli"
@@ -39,9 +58,7 @@ dev = [
   "flake8>=4.0",
 ]
 
-[tool.setuptools]
-
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["codexify*"]
-exclude = ["tests*", "examples*"]
+exclude = ["tests*"]

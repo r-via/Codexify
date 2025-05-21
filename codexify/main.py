@@ -1,12 +1,11 @@
-# File: codexify/main.py
-# ------------------------------------------------------------
+# codexify/main.py
 from typing import List, Optional, Dict, Any, Callable, Set
 import os
+import tiktoken
+from gitignore_parser import parse_gitignore
 
 from .types import CompilationConfig, CompilationResult
-
 from .core.common import BASE_PERMANENT_EXCLUSIONS, CONFIG_FILE_PATTERN
-from .core.dependencies import ensure_tiktoken_module, ensure_gitignore_parser_module
 from .core.go_utils import get_go_package_locations, get_go_package_content_files
 from .core.tree_builder import build_tree_structure, print_tree, build_filtered_file_list, TreeDict
 from .core.content_compiler import assemble_compiled_content
@@ -18,6 +17,7 @@ def generate_compiled_output(config: CompilationConfig) -> CompilationResult:
 
     This function orchestrates the entire compilation process:
     1. Initializes necessary modules (tiktoken, gitignore parser).
+       If they are missing, an ImportError will be raised.
     2. Sets up permanent exclusions for path and Go package processing.
     3. If a project path is provided:
         - Builds a directory tree structure, respecting .gitignore and other exclusions.
@@ -43,10 +43,14 @@ def generate_compiled_output(config: CompilationConfig) -> CompilationResult:
     if config.verbose:
         print("--- Starting Compilation Process (Programmatic Call) ---")
 
-    tiktoken_mod: Any = config.tiktoken_module or ensure_tiktoken_module()
+    # If tiktoken_module is not pre-set in config, use the direct import.
+    # An ImportError will occur here if tiktoken is not installed.
+    effective_tiktoken_mod: Any = config.tiktoken_module or tiktoken
 
-    parse_git_func: Callable[[str, Optional[str]], Callable[[str], bool]] = \
-        config.parse_gitignore_func or ensure_gitignore_parser_module()
+    # If parse_gitignore_func is not pre-set in config, use the direct import.
+    # An ImportError will occur if gitignore_parser is not installed.
+    effective_parse_git_func: Callable[[str, Optional[str]], Callable[[str], bool]] = \
+        config.parse_gitignore_func or parse_gitignore
 
     path_perm_excludes: Set[str] = BASE_PERMANENT_EXCLUSIONS.union(config.additional_path_permanent_exclusions)
     path_perm_excludes.add(CONFIG_FILE_PATTERN)
@@ -65,12 +69,12 @@ def generate_compiled_output(config: CompilationConfig) -> CompilationResult:
             print(f"Permanently excluding from path processing: {', '.join(sorted(list(path_perm_excludes)))}")
 
         path_tree: TreeDict = build_tree_structure(
-            root_abs_path, True, config.gitignore_file_path, parse_git_func,
+            root_abs_path, True, config.gitignore_file_path, effective_parse_git_func,
             path_perm_excludes, config.exclude_dirs, config.exclude_files, config.extensions
         )
         filtered_path_files = build_filtered_file_list(
             root_abs_path, config.extensions, config.exclude_dirs, config.exclude_files,
-            config.gitignore_file_path, parse_git_func, path_perm_excludes, CONFIG_FILE_PATTERN
+            config.gitignore_file_path, effective_parse_git_func, path_perm_excludes, CONFIG_FILE_PATTERN
         )
         root_dir_name = os.path.basename(root_abs_path) if root_abs_path != '.' else 'current_directory'
         path_tree_lines = print_tree(path_tree, root_display_name=root_dir_name)
@@ -93,7 +97,7 @@ def generate_compiled_output(config: CompilationConfig) -> CompilationResult:
             for pkg_path, pkg_dir in package_locations.items():
                 if config.verbose: print(f"Building tree for package: {pkg_path} (from {pkg_dir})")
                 pkg_tree: TreeDict = build_tree_structure(
-                    pkg_dir, False, None, parse_git_func,
+                    pkg_dir, False, None, effective_parse_git_func,
                     go_perm_excludes, [], [], ['.go']
                 )
                 package_trees_map[pkg_path] = pkg_tree
@@ -106,17 +110,23 @@ def generate_compiled_output(config: CompilationConfig) -> CompilationResult:
 
     compiled_text, files_compiled, files_skipped = assemble_compiled_content(
         config, root_abs_path, path_tree_lines, filtered_path_files,
-        package_tree_lines_map, package_content_files, package_trees_map, # pyright: ignore [reportArgumentType]
+        package_tree_lines_map, package_content_files, package_trees_map,
         path_perm_excludes, go_perm_excludes
     )
 
     token_count_val = 0
-    if tiktoken_mod:
+    # effective_tiktoken_mod refers to the imported tiktoken module or one passed via config
+    if effective_tiktoken_mod:
         try:
-            encoding = tiktoken_mod.get_encoding("cl100k_base")
+            encoding = effective_tiktoken_mod.get_encoding("cl100k_base")
             token_count_val = len(encoding.encode(compiled_text, allowed_special="all"))
         except Exception as e_token:
             if config.verbose: print(f"\nWarning: Could not calculate token count using tiktoken: {e_token}")
+            # An ImportError specifically for tiktoken here would mean it was not installed
+            # and config.tiktoken_module was also None.
+            if isinstance(e_token, ImportError) and "tiktoken" in str(e_token).lower():
+                 print("Please ensure 'tiktoken' is installed: pip install tiktoken")
+
 
     output_file_written_path = None
     if config.output_file_path:
@@ -129,6 +139,9 @@ def generate_compiled_output(config: CompilationConfig) -> CompilationResult:
             if config.verbose: print(f"Output successfully written to: {abs_output_path}")
         except IOError as e_io:
             return CompilationResult(success=False, error_message=f"Failed to write output file '{config.output_file_path}': {e_io}")
+        except Exception as e_general_write: # Catch other potential errors during file write
+            return CompilationResult(success=False, error_message=f"An unexpected error occurred writing output file '{config.output_file_path}': {e_general_write}")
+
 
     return CompilationResult(
         success=True,

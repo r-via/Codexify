@@ -28,6 +28,7 @@ lerna-debug.log
 # --- Répertoires de Dépendances ---
 # node_modules: Ignoré PARTOUT dans le projet
 node_modules/
+.venv-codexify/
 
 # vendor, vendors, bower_components: Typiquement à la racine
 /vendor/
