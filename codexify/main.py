@@ -1,61 +1,56 @@
-from typing import List, Optional, Tuple, Dict, Any, Callable, Set
-from dataclasses import dataclass, field
-import os # Added os import
+# File: codexify/main.py
+# ------------------------------------------------------------
+from typing import List, Optional, Dict, Any, Callable, Set
+import os
 
 from .types import CompilationConfig, CompilationResult
 
-from .core.common import BASE_PERMANENT_EXCLUSIONS, CONFIG_FILE_PATTERN, DEFAULT_OUTPUT_BASENAME
+from .core.common import BASE_PERMANENT_EXCLUSIONS, CONFIG_FILE_PATTERN
 from .core.dependencies import ensure_tiktoken_module, ensure_gitignore_parser_module
-from .core.file_system import load_gitignore, is_likely_binary, get_parent_folder_name, count_contents
 from .core.go_utils import get_go_package_locations, get_go_package_content_files
-from .core.tree_builder import build_tree_structure, print_tree, build_filtered_file_list
+from .core.tree_builder import build_tree_structure, print_tree, build_filtered_file_list, TreeDict
 from .core.content_compiler import assemble_compiled_content
 
-@dataclass
-class CompilationConfig:
-    """Configuration for the compilation process."""
-    project_path: Optional[str] = None
-    extensions: List[str] = field(default_factory=list)
-    go_packages: List[str] = field(default_factory=list)
-    output_file_path: Optional[str] = None
-    exclude_dirs: List[str] = field(default_factory=list)
-    exclude_files: List[str] = field(default_factory=list)
-    gitignore_file_path: Optional[str] = None
-    additional_path_permanent_exclusions: Set[str] = field(default_factory=set)
-    additional_go_permanent_exclusions: Set[str] = field(default_factory=set)
-    tiktoken_module: Optional[Any] = None
-    parse_gitignore_func: Optional[Callable] = None
-    verbose: bool = True
-
-@dataclass
-class CompilationResult:
-    """Result of the compilation process."""
-    success: bool = False
-    compiled_text: Optional[str] = None
-    token_count: int = 0
-    files_compiled_count: int = 0
-    files_skipped_count: int = 0
-    output_file_path: Optional[str] = None
-    error_message: Optional[str] = None
 
 def generate_compiled_output(config: CompilationConfig) -> CompilationResult:
     """
     Generates compiled output based on the provided configuration.
 
+    This function orchestrates the entire compilation process:
+    1. Initializes necessary modules (tiktoken, gitignore parser).
+    2. Sets up permanent exclusions for path and Go package processing.
+    3. If a project path is provided:
+        - Builds a directory tree structure, respecting .gitignore and other exclusions.
+        - Filters files based on specified extensions and exclusion rules.
+        - Collects lines for the tree representation.
+    4. If Go packages are specified:
+        - Locates Go packages on disk using the `go` command-line tool.
+        - Builds tree structures for each Go package, focusing on `.go` files.
+        - Collects `.go` files for content compilation from these packages.
+    5. Assembles the final compiled text, including all gathered tree representations
+       and the content of the selected files from both the project path and Go packages.
+    6. Calculates an estimated token count of the compiled text using the tiktoken
+       library with the "cl100k_base" encoding.
+    7. If an output file path is specified in the configuration, writes the compiled
+       text to that file, creating parent directories if they do not exist.
+
     Args:
-        config: A CompilationConfig object.
-
+        config: A `CompilationConfig` object containing all parameters
+                for the compilation.
     Returns:
-        A CompilationResult object.
+        A `CompilationResult` object containing the outcome of the compilation.
     """
-    if config.verbose: print("--- Starting Compilation Process (Programmatic Call) ---")
+    if config.verbose:
+        print("--- Starting Compilation Process (Programmatic Call) ---")
 
-    tiktoken_mod = config.tiktoken_module or ensure_tiktoken_module()
-    parse_git_func = config.parse_gitignore_func or ensure_gitignore_parser_module()
+    tiktoken_mod: Any = config.tiktoken_module or ensure_tiktoken_module()
 
-    path_perm_excludes = BASE_PERMANENT_EXCLUSIONS.union(config.additional_path_permanent_exclusions)
+    parse_git_func: Callable[[str, Optional[str]], Callable[[str], bool]] = \
+        config.parse_gitignore_func or ensure_gitignore_parser_module()
+
+    path_perm_excludes: Set[str] = BASE_PERMANENT_EXCLUSIONS.union(config.additional_path_permanent_exclusions)
     path_perm_excludes.add(CONFIG_FILE_PATTERN)
-    go_perm_excludes = BASE_PERMANENT_EXCLUSIONS.union(config.additional_go_permanent_exclusions)
+    go_perm_excludes: Set[str] = BASE_PERMANENT_EXCLUSIONS.union(config.additional_go_permanent_exclusions)
 
     path_tree_lines: List[str] = []
     filtered_path_files: List[str] = []
@@ -69,7 +64,7 @@ def generate_compiled_output(config: CompilationConfig) -> CompilationResult:
             print(f"\n--- Processing Directory: {root_abs_path} ---")
             print(f"Permanently excluding from path processing: {', '.join(sorted(list(path_perm_excludes)))}")
 
-        path_tree = build_tree_structure(
+        path_tree: TreeDict = build_tree_structure(
             root_abs_path, True, config.gitignore_file_path, parse_git_func,
             path_perm_excludes, config.exclude_dirs, config.exclude_files, config.extensions
         )
@@ -80,11 +75,11 @@ def generate_compiled_output(config: CompilationConfig) -> CompilationResult:
         root_dir_name = os.path.basename(root_abs_path) if root_abs_path != '.' else 'current_directory'
         path_tree_lines = print_tree(path_tree, root_display_name=root_dir_name)
     elif config.verbose:
-        print("\n--- No project_path specified, skipping local directory processing. ---")
+         print("\n--- No project_path specified, skipping local directory processing. ---")
 
     package_tree_lines_map: Dict[str, List[str]] = {}
     package_content_files: List[Dict[str, str]] = []
-    package_trees_map: Dict[str, Dict] = {}
+    package_trees_map: Dict[str, TreeDict] = {}
 
     if config.go_packages:
         if config.verbose:
@@ -92,18 +87,18 @@ def generate_compiled_output(config: CompilationConfig) -> CompilationResult:
             print(f"Permanently excluding from Go package processing: {', '.join(sorted(list(go_perm_excludes)))}")
 
         project_root_for_go_mod = root_abs_path if root_abs_path and os.path.exists(os.path.join(root_abs_path, 'go.mod')) else os.getcwd()
-        package_locations = get_go_package_locations(config.go_packages, project_root_for_go_mod)
+        package_locations = get_go_package_locations(config, config.go_packages, project_root_for_go_mod)
 
         if package_locations:
             for pkg_path, pkg_dir in package_locations.items():
                 if config.verbose: print(f"Building tree for package: {pkg_path} (from {pkg_dir})")
-                pkg_tree = build_tree_structure(
+                pkg_tree: TreeDict = build_tree_structure(
                     pkg_dir, False, None, parse_git_func,
                     go_perm_excludes, [], [], ['.go']
                 )
                 package_trees_map[pkg_path] = pkg_tree
                 package_tree_lines_map[pkg_path] = print_tree(pkg_tree, root_display_name=f"package:{pkg_path}")
-            package_content_files = get_go_package_content_files(package_locations)
+            package_content_files = get_go_package_content_files(config, package_locations)
         elif config.verbose:
             print("No Go package locations found or 'go' command failed, cannot process packages.")
     elif config.verbose:
@@ -111,7 +106,7 @@ def generate_compiled_output(config: CompilationConfig) -> CompilationResult:
 
     compiled_text, files_compiled, files_skipped = assemble_compiled_content(
         config, root_abs_path, path_tree_lines, filtered_path_files,
-        package_tree_lines_map, package_content_files, package_trees_map,
+        package_tree_lines_map, package_content_files, package_trees_map, # pyright: ignore [reportArgumentType]
         path_perm_excludes, go_perm_excludes
     )
 

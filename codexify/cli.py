@@ -1,19 +1,45 @@
-# codexify/codexify/cli.py
+# File: codexify/codexify/cli.py
+# ------------------------------------------------------------
 import os
 import sys
 import argparse
 import fnmatch
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
-from .main import generate_compiled_output, CompilationConfig
+from .main import generate_compiled_output
+from .types import CompilationConfig
 from .core.dependencies import ensure_pyyaml_module
 from .core.common import CONFIG_FILE_PATTERN, DEFAULT_OUTPUT_BASENAME
 from .core.file_system import get_parent_folder_name
 
-
 def _load_config_from_yaml_for_cli(config_file_path: str,
                                    yaml_module: Any) -> Dict[str, Any]:
-    """Loads configuration from a YAML file for CLI use."""
+    """
+    Loads configuration from a YAML file for CLI use.
+
+    Paths within the YAML file ('path', 'gitignore') are resolved relative
+    to the YAML file's directory if they are relative. If 'path' is specified,
+    'extensions' must also be present. The config must define either 'path'
+    or 'packages'.
+
+    Args:
+        config_file_path: Path to the YAML configuration file.
+        yaml_module: The imported 'yaml' module (PyYAML).
+
+    Returns:
+        A dictionary containing processed configuration values:
+        - "project_path": Absolute path to the project, or None.
+        - "extensions": List of file extensions.
+        - "go_packages": List of Go package paths.
+        - "output_base_name_no_ext": Base name for the output file (no "compiled." prefix or .txt).
+        - "exclude_dirs": List of directory names to exclude.
+        - "exclude_files": List of file names to exclude.
+        - "gitignore_file_path": Absolute path to the .gitignore file, or None.
+        - "config_source_dir": Absolute path to the directory containing the config file.
+
+    Raises:
+        SystemExit: If the config file is not found, invalid, or essential fields are missing.
+    """
     try:
         abs_config_path = os.path.abspath(config_file_path)
         config_basename = os.path.basename(config_file_path)
@@ -28,12 +54,13 @@ def _load_config_from_yaml_for_cli(config_file_path: str,
             )
 
         with open(abs_config_path, 'r', encoding='utf-8') as f:
-            loaded_config = yaml_module.safe_load(f)
-        if not loaded_config:
+            loaded_config_any = yaml_module.safe_load(f)
+        if not isinstance(loaded_config_any, dict):
             print(
-                f"Error: Config file '{config_file_path}' is empty or invalid YAML."
+                f"Error: Config file '{config_file_path}' is empty or invalid YAML (not a dictionary)."
             )
             sys.exit(1)
+        loaded_config: Dict[str, Any] = loaded_config_any
 
         config_dir = os.path.dirname(abs_config_path)
 
@@ -46,19 +73,19 @@ def _load_config_from_yaml_for_cli(config_file_path: str,
         gitignore_in_yaml_value = loaded_config.get('gitignore')
         resolved_gitignore_path: Optional[str] = None
         if gitignore_in_yaml_value is not None:
-            if os.path.isabs(gitignore_in_yaml_value):
-                resolved_gitignore_path = str(gitignore_in_yaml_value)
+            str_gitignore_value = str(gitignore_in_yaml_value)
+            if os.path.isabs(str_gitignore_value):
+                resolved_gitignore_path = str_gitignore_value
             elif abs_project_path_from_yaml:
                 project_base_dir_for_gitignore = os.path.dirname(
                     abs_project_path_from_yaml) if os.path.isfile(
                         abs_project_path_from_yaml
                     ) else abs_project_path_from_yaml
                 resolved_gitignore_path = os.path.normpath(
-                    os.path.join(project_base_dir_for_gitignore,
-                                 str(gitignore_in_yaml_value)))
+                    os.path.join(project_base_dir_for_gitignore, str_gitignore_value))
             else:
                 resolved_gitignore_path = os.path.normpath(
-                    os.path.join(config_dir, str(gitignore_in_yaml_value)))
+                    os.path.join(config_dir, str_gitignore_value))
 
         if abs_project_path_from_yaml and 'extensions' not in loaded_config:
             print(
@@ -75,8 +102,14 @@ def _load_config_from_yaml_for_cli(config_file_path: str,
         default_output_base_no_ext = DEFAULT_OUTPUT_BASENAME
         if default_output_base_no_ext.endswith(".txt"):
             default_output_base_no_ext = default_output_base_no_ext[:-4]
-        output_base_no_ext = loaded_config.get('output',
-                                               default_output_base_no_ext)
+        
+        output_base_no_ext_any = loaded_config.get('output', default_output_base_no_ext)
+        output_base_no_ext: str
+        if isinstance(output_base_no_ext_any, str):
+             output_base_no_ext = output_base_no_ext_any
+        else: # Fallback if 'output' is not a string
+             output_base_no_ext = default_output_base_no_ext
+
 
         return {
             "project_path": abs_project_path_from_yaml,
@@ -102,7 +135,23 @@ def _save_config_for_cli(args: argparse.Namespace, yaml_module: Any,
                          output_base_name_no_ext_for_yaml: str) -> str:
     """
     Saves CLI arguments to a YAML configuration file.
-    output_base_name_no_ext_for_yaml: The base name (e.g., "myproject") to be stored in the YAML's 'output' key.
+
+    Paths for 'path' and 'gitignore' in the YAML file are made relative
+    to the YAML file's location if possible. 'path' is relative to the
+    config file's directory. 'gitignore' is relative to the 'path' directory
+    if 'path' is specified, otherwise relative to the config file's directory.
+
+    Args:
+        args: Parsed command-line arguments (argparse.Namespace).
+        yaml_module: The imported 'yaml' module (PyYAML).
+        determined_output_dir: The absolute directory where the config file (and output) will be saved.
+        output_base_name_no_ext_for_yaml: The base name for the 'output' field in YAML.
+
+    Returns:
+        The absolute path to the saved configuration file.
+
+    Raises:
+        SystemExit: If required arguments for saving are missing or if saving fails.
     """
     config_data: Dict[str, Any] = {}
     if not args.path and not args.packages:
@@ -116,59 +165,67 @@ def _save_config_for_cli(args: argparse.Namespace, yaml_module: Any,
         )
         sys.exit(1)
 
-    config_name_base = args.config_name if args.config_name else (
-        get_parent_folder_name(args.path) if args.path else "output")
+    _name_candidate: Optional[str] = None
+    if args.config_name and isinstance(args.config_name, str):
+        _name_candidate = args.config_name
+    elif args.path and isinstance(args.path, str):
+        _name_candidate = get_parent_folder_name(args.path)
+    
+    config_name_base: str = _name_candidate if _name_candidate and _name_candidate.strip() else "output"
+
+
     config_basename_final = f"config.compiled.{config_name_base}.yaml"
     config_filename = os.path.abspath(
         os.path.join(determined_output_dir, config_basename_final))
     config_file_actual_dir = os.path.dirname(config_filename)
-    print(f"Determined config file path for saving: {config_filename}")
+    
+    if args.path and isinstance(args.path, str):
+        print(f"Determined config file path for saving: {config_filename}")
+    else:
+        print(f"Config file for saving: {config_filename}")
 
-    # 1. Determine absolute path of the project processed by CLI (from CWD of command)
+
     abs_cli_project_path: Optional[str] = None
-    if args.path:
+    if args.path and isinstance(args.path, str):
         abs_cli_project_path = os.path.abspath(args.path)
 
-    # 2. Determine path to be stored in YAML for the project (relative to YAML's future location)
     path_in_yaml: Optional[str] = None
     if abs_cli_project_path:
         try:
             path_in_yaml = os.path.relpath(abs_cli_project_path,
                                            config_file_actual_dir)
-        except ValueError:
-            path_in_yaml = abs_cli_project_path  # Different drives
+        except ValueError: # Paths on different drives on Windows
+            path_in_yaml = abs_cli_project_path
 
-    # 3. Determine absolute path of the gitignore file intended by CLI
-    #    (relative to abs_cli_project_path if args.gitignore is relative)
     abs_intended_cli_gitignore_path: Optional[str] = None
-    if args.gitignore:
+    if args.gitignore and isinstance(args.gitignore, str):
         if os.path.isabs(args.gitignore):
             abs_intended_cli_gitignore_path = args.gitignore
-        elif abs_cli_project_path:  # --gitignore is relative to --path
+        elif abs_cli_project_path: # If path provided, gitignore is relative to it
             abs_intended_cli_gitignore_path = os.path.normpath(
                 os.path.join(abs_cli_project_path, args.gitignore))
-        else:  # --gitignore is relative to CWD (no --path provided)
+        else: # No path, gitignore is relative to CWD (or absolute)
             abs_intended_cli_gitignore_path = os.path.abspath(args.gitignore)
 
-    # 4. Determine gitignore path to be stored in YAML (relative to path_in_yaml)
     gitignore_in_yaml: Optional[str] = None
     if abs_intended_cli_gitignore_path:
-        if path_in_yaml:  # If a project path will be in YAML
-            # Base for relativity is the project path as it will be known from the YAML
-            project_dir_for_yaml_relativity = os.path.abspath(
-                os.path.join(config_file_actual_dir, path_in_yaml))
-            if os.path.isfile(project_dir_for_yaml_relativity
-                              ):  # If path_in_yaml points to a file
-                project_dir_for_yaml_relativity = os.path.dirname(
-                    project_dir_for_yaml_relativity)
+        # Determine the base for making gitignore_in_yaml relative
+        # If path_in_yaml exists, gitignore is relative to that resolved project path
+        # Otherwise, it's relative to the config file's directory
+        if path_in_yaml: # path_in_yaml is relative to config_file_actual_dir or absolute
+            project_dir_for_yaml_relativity_base = os.path.join(config_file_actual_dir, path_in_yaml)
+            project_dir_for_yaml_relativity = os.path.abspath(project_dir_for_yaml_relativity_base)
 
+            # If project_dir_for_yaml_relativity points to a file, use its parent dir
+            if os.path.isfile(project_dir_for_yaml_relativity):
+                project_dir_for_yaml_relativity = os.path.dirname(project_dir_for_yaml_relativity)
             try:
                 gitignore_in_yaml = os.path.relpath(
                     abs_intended_cli_gitignore_path,
                     project_dir_for_yaml_relativity)
-            except ValueError:  # Different drives
-                gitignore_in_yaml = abs_intended_cli_gitignore_path  # Fallback to absolute
-        else:  # No project path in YAML, make gitignore relative to YAML file itself or absolute
+            except ValueError:
+                gitignore_in_yaml = abs_intended_cli_gitignore_path
+        else: # No 'path' in YAML, make gitignore relative to config file's directory
             try:
                 gitignore_in_yaml = os.path.relpath(
                     abs_intended_cli_gitignore_path, config_file_actual_dir)
@@ -180,9 +237,12 @@ def _save_config_for_cli(args: argparse.Namespace, yaml_module: Any,
     config_data['output'] = output_base_name_no_ext_for_yaml
     config_data['packages'] = args.packages if args.packages else []
     config_data['exclude'] = args.exclude if args.exclude else []
-    config_data[
-        'exclude_files'] = args.exclude_files if args.exclude_files else []
+    config_data['exclude_files'] = args.exclude_files if args.exclude_files else []
     config_data['gitignore'] = gitignore_in_yaml
+
+    # Filter out None values before saving, if desired, or ensure YAML handles them gracefully
+    # PyYAML typically omits None values or writes `null` depending on `default_flow_style` etc.
+    # For this use case, explicit None (null in YAML) is fine for optional fields.
 
     print(f"Attempting to save configuration to: {config_filename}")
     try:
@@ -200,234 +260,224 @@ def _save_config_for_cli(args: argparse.Namespace, yaml_module: Any,
         sys.exit(1)
     return config_filename
 
-
 def run_cli():
-    """Handles CLI argument parsing and orchestrates the compilation."""
+    """
+    Handles CLI argument parsing and orchestrates the compilation.
+
+    This function:
+    1. Parses command-line arguments.
+    2. Loads configuration from a YAML file if `--config` is used,
+       otherwise uses CLI arguments.
+    3. Determines output file path and name.
+    4. Adds the CLI script itself to permanent exclusions if it's within the
+       project path being analyzed.
+    5. If `--save` is used (and not `--config`), saves the current CLI-derived
+       configuration to a YAML file.
+    6. Calls `generate_compiled_output` with the `CompilationConfig`.
+    7. Prints results or error messages.
+    """
     package_name_str = "codexify"
 
-    script_filename = os.path.basename(
-        sys.argv[0] if sys.argv else package_name_str)
     parser = argparse.ArgumentParser(
-        description=
-        "Codexify: Compiles project files into structured text for LLM context.",
+        description="Codexify: Compiles project files into structured text for LLM context.",
         formatter_class=argparse.RawTextHelpFormatter,
-        epilog=
-        f"Example:\n  python3 -m {package_name_str}.cli --path ../p --ext .py --save\n  {package_name_str} --path ../p --ext .py --gitignore .gitignore",
-        add_help=False)
-    parser.add_argument('-h',
-                        '--help',
-                        action='help',
-                        default=argparse.SUPPRESS,
-                        help='Show this help message and exit.')
-    parser.add_argument(
-        "--save",
-        action='store_true',
-        help="Save CLI args to 'config.compiled.<name>.yaml' and compile.")
-    parser.add_argument(
-        "--config",
-        help=
-        f"Path to YAML config file (e.g., {CONFIG_FILE_PATTERN.replace('*', 'name')})."
+        epilog=f"Example:\n  python3 -m {package_name_str}.cli --path ../p --ext .py --save\n  {package_name_str} --path ../p --ext .py --gitignore .gitignore",
+        add_help=False # Custom help action added below
     )
-    parser.add_argument(
-        "--path",
-        help="Directory to explore (relative to current working directory).")
-    parser.add_argument(
-        "--extensions",
-        "--ext",
-        nargs='+',
-        help="File extensions for content compilation from --path.")
-    parser.add_argument("--packages",
-                        nargs='+',
-                        help="Go package path(s) to include.")
-    parser.add_argument(
-        "--output",
-        help=
-        "Base name for output file. If a path, its dirname is used for output dir. Default derived from --path or 'output'."
-    )
-    parser.add_argument(
-        "--config-name",
-        help="Base name for config file (e.g., 'myproj'). Used with --save.")
-    parser.add_argument("--exclude",
-                        nargs="*",
-                        default=[],
-                        help="Dir names to exclude from content in --path.")
-    parser.add_argument("--exclude-files",
-                        nargs="*",
-                        default=[],
-                        help="File names to exclude from content in --path.")
-    parser.add_argument(
-        "--gitignore",
-        help=
-        "Path to .gitignore file to use (relative to --path if relative CLI arg, otherwise absolute or resolved from YAML)."
-    )
-    parser.add_argument("-q",
-                        "--quiet",
-                        action="store_true",
-                        help="Suppress verbose output from core logic.")
+    
+    # Main operations
+    parser.add_argument("--path", help="Directory to explore (relative to current working directory or absolute).")
+    parser.add_argument("--extensions", "--ext", nargs='+', help="File extensions for content compilation from --path (e.g., .py .md).")
+    parser.add_argument("--packages", nargs='+', help="Go package import path(s) to include (e.g., github.com/gin-gonic/gin).")
+    
+    # Configuration management
+    parser.add_argument("--config", help=f"Path to YAML config file (e.g., {CONFIG_FILE_PATTERN.replace('*', 'myproject')}). Overrides most other CLI args.")
+    parser.add_argument("--save", action='store_true', help="Save CLI arguments to 'config.compiled.<name>.yaml' and then compile. Ignored if --config is used.")
+    parser.add_argument("--config-name", help="Base name for the generated config file when using --save (e.g., 'myproj'). Defaults based on --path or 'output'.")
 
+    # Output control
+    parser.add_argument("--output", help="Base name or full path for the output file. If a path, its directory is used as the output directory. Default name is derived from --path or 'output'.")
+    
+    # Filtering
+    parser.add_argument("--exclude", nargs="*", default=[], help="Directory names to exclude from content compilation when processing --path.") # type: ignore
+    parser.add_argument("--exclude-files", nargs="*", default=[], help="File names to exclude from content compilation when processing --path.") # type: ignore
+    parser.add_argument("--gitignore", help="Path to a .gitignore file to use. Relative to --path if --path is given and this is relative, else relative to CWD or absolute.")
+
+    # Miscellaneous
+    parser.add_argument("-q", "--quiet", action="store_true", help="Suppress verbose output from core logic (progress messages).")
+    parser.add_argument('-h', '--help', action='help', default=argparse.SUPPRESS, help='Show this help message and exit.')
+    
     try:
-        version_str = __import__(f"{package_name_str}.version",
-                                 fromlist=['__version__']).__version__
+        from .version import __version__ as version_str
     except ImportError:
         version_str = "unknown"
-    parser.add_argument('--version',
-                        action='version',
-                        version=f'%(prog)s {version_str}')
+    parser.add_argument('--version', action='version', version=f'%(prog)s {version_str}')
 
     args = parser.parse_args()
 
     comp_config = CompilationConfig(verbose=not args.quiet)
     output_base_name_no_ext: str
-    output_dir_cli: str
+    output_dir_cli: str # Directory where the compiled output (and potentially config) will be saved.
 
-    yaml_mod = None
-    if args.config:
-        if not yaml_mod: yaml_mod = ensure_pyyaml_module()
-        cli_loaded_yaml_config = _load_config_from_yaml_for_cli(
-            args.config, yaml_mod)
+    yaml_mod: Optional[Any] = None
+    
+    cli_path_arg: Optional[str] = args.path
+    cli_extensions_arg: Optional[List[str]] = args.extensions
+    cli_packages_arg: Optional[List[str]] = args.packages
+    cli_exclude_arg: List[str] = args.exclude
+    cli_exclude_files_arg: List[str] = args.exclude_files
+    cli_gitignore_arg: Optional[str] = args.gitignore
+    cli_output_arg: Optional[str] = args.output
+
+
+    if args.config and isinstance(args.config, str):
+        yaml_mod = ensure_pyyaml_module()
+        cli_loaded_yaml_config = _load_config_from_yaml_for_cli(args.config, yaml_mod)
 
         comp_config.project_path = cli_loaded_yaml_config["project_path"]
         comp_config.extensions = cli_loaded_yaml_config["extensions"]
         comp_config.go_packages = cli_loaded_yaml_config["go_packages"]
         comp_config.exclude_dirs = cli_loaded_yaml_config["exclude_dirs"]
         comp_config.exclude_files = cli_loaded_yaml_config["exclude_files"]
-        comp_config.gitignore_file_path = cli_loaded_yaml_config[
-            "gitignore_file_path"]
+        comp_config.gitignore_file_path = cli_loaded_yaml_config["gitignore_file_path"]
+        output_base_name_no_ext = cli_loaded_yaml_config["output_base_name_no_ext"]
 
-        output_base_name_no_ext = cli_loaded_yaml_config[
-            "output_base_name_no_ext"]
-
+        # Determine output directory based on config file's context
+        # If project_path is set from YAML, output relative to it (or its dir if it's a file).
+        # Otherwise, output relative to the YAML file's directory.
         if comp_config.project_path:
-            output_dir_cli = os.path.dirname(
-                comp_config.project_path) if os.path.isfile(
-                    comp_config.project_path) else comp_config.project_path
+            # project_path is already absolute if resolved from YAML
+            output_dir_cli = os.path.dirname(comp_config.project_path) if os.path.isfile(comp_config.project_path) else comp_config.project_path
         else:
-            output_dir_cli = cli_loaded_yaml_config["config_source_dir"]
-        print(f"Loaded configuration from: {args.config}")
-    else:  # No --config, using CLI args
-        if not args.path and not args.packages:
-            parser.error(
-                "Either --path or --packages must be specified if not using --config."
-            )
-        if args.path and not args.extensions:
-            parser.error(
-                "--extensions (--ext) are required when --path is specified without --config."
-            )
+            output_dir_cli = cli_loaded_yaml_config["config_source_dir"] # This is abspath of YAML dir
+        
+        if comp_config.verbose: print(f"Loaded configuration from: {args.config}")
+    else: # Not using --config, so use CLI arguments
+        if not cli_path_arg and not cli_packages_arg:
+            parser.error("Either --path or --packages must be specified if not using --config.")
+        if cli_path_arg and not cli_extensions_arg:
+            parser.error("--extensions (--ext) are required when --path is specified without --config.")
 
-        if args.path:
-            comp_config.project_path = os.path.abspath(args.path)
+        if cli_path_arg:
+            comp_config.project_path = os.path.abspath(cli_path_arg)
         else:
             comp_config.project_path = None
 
-        comp_config.extensions = args.extensions if args.extensions else []
-        comp_config.go_packages = args.packages if args.packages else []
-        comp_config.exclude_dirs = args.exclude
-        comp_config.exclude_files = args.exclude_files
+        comp_config.extensions = cli_extensions_arg if cli_extensions_arg else []
+        comp_config.go_packages = cli_packages_arg if cli_packages_arg else []
+        comp_config.exclude_dirs = cli_exclude_arg
+        comp_config.exclude_files = cli_exclude_files_arg
 
-        if args.gitignore:
-            if os.path.isabs(args.gitignore):
-                comp_config.gitignore_file_path = args.gitignore
-            elif comp_config.project_path:
-                comp_config.gitignore_file_path = os.path.normpath(
-                    os.path.join(comp_config.project_path, args.gitignore))
-            else:
-                comp_config.gitignore_file_path = os.path.abspath(
-                    args.gitignore)
+        if cli_gitignore_arg:
+            if os.path.isabs(cli_gitignore_arg):
+                comp_config.gitignore_file_path = cli_gitignore_arg
+            elif comp_config.project_path: # project_path is abspath here if set
+                comp_config.gitignore_file_path = os.path.normpath(os.path.join(comp_config.project_path, cli_gitignore_arg))
+            else: # No project_path, gitignore relative to CWD or absolute
+                comp_config.gitignore_file_path = os.path.abspath(cli_gitignore_arg)
         else:
             comp_config.gitignore_file_path = None
 
-        if args.output:
-            output_base_name_from_arg = os.path.basename(args.output)
-            output_base_name_no_ext = output_base_name_from_arg[:-4] if output_base_name_from_arg.endswith(
-                ".txt") else output_base_name_from_arg
+        # Determine output directory and base name from CLI args
+        if cli_output_arg:
+            abs_cli_output_arg = os.path.abspath(cli_output_arg)
+            output_base_name_from_arg = os.path.basename(abs_cli_output_arg)
+            output_base_name_no_ext = output_base_name_from_arg[:-4] if output_base_name_from_arg.endswith(".txt") else output_base_name_from_arg
+            
+            # If cli_output_arg appears to be a directory (e.g. "mydir/" or "mydir")
+            # or if its dirname is non-empty (e.g. "path/to/file"), use that as output_dir_cli.
+            output_dir_candidate = os.path.dirname(abs_cli_output_arg)
+            if output_dir_candidate and output_base_name_from_arg : #  cli_output_arg was "path/to/filename" or "path/to/"
+                output_dir_cli = output_dir_candidate
+            elif not output_dir_candidate and output_base_name_from_arg : # cli_output_arg was "filename"
+                 if comp_config.project_path:
+                    output_dir_cli = comp_config.project_path
+                 else:
+                    output_dir_cli = os.getcwd()
+            else: # cli_output_arg was likely just a directory name e.g. "output_folder"
+                output_dir_cli = abs_cli_output_arg
+                # Need to re-evaluate output_base_name_no_ext for this case
+                parent_name = get_parent_folder_name(comp_config.project_path) if comp_config.project_path else None
+                default_base = DEFAULT_OUTPUT_BASENAME[:-4] if DEFAULT_OUTPUT_BASENAME.endswith(".txt") else DEFAULT_OUTPUT_BASENAME
+                output_base_name_no_ext = parent_name if parent_name else default_base
 
-            output_dir_candidate = os.path.dirname(args.output)
-            if output_dir_candidate:
-                output_dir_cli = os.path.abspath(output_dir_candidate)
-            elif comp_config.project_path:
-                output_dir_cli = comp_config.project_path
-            else:
-                output_dir_cli = os.getcwd()
-        else:
-            parent_name = get_parent_folder_name(
-                comp_config.project_path) if comp_config.project_path else None
-            default_base_no_ext = DEFAULT_OUTPUT_BASENAME[:-4] if DEFAULT_OUTPUT_BASENAME.endswith(
-                ".txt") else DEFAULT_OUTPUT_BASENAME
-            output_base_name_no_ext = parent_name if parent_name else default_base_no_ext
 
+        else: # No --output arg, derive from project_path or use defaults
+            parent_name = get_parent_folder_name(comp_config.project_path) if comp_config.project_path else None
+            default_base = DEFAULT_OUTPUT_BASENAME[:-4] if DEFAULT_OUTPUT_BASENAME.endswith(".txt") else DEFAULT_OUTPUT_BASENAME
+            output_base_name_no_ext = parent_name if parent_name else default_base
+            
             if comp_config.project_path:
-                output_dir_cli = comp_config.project_path
-            else:
+                output_dir_cli = comp_config.project_path # Output to project path dir
+            else: # No project path, output to CWD
                 output_dir_cli = os.getcwd()
-        print("Using command-line arguments for configuration.")
+        if comp_config.verbose: print("Using command-line arguments for configuration.")
 
-    output_base_name_with_ext = output_base_name_no_ext + ".txt"
-    final_output_filename_for_compilation = "compiled." + output_base_name_with_ext
-    comp_config.output_file_path = os.path.join(
-        output_dir_cli, final_output_filename_for_compilation)
-    if comp_config.verbose:
-        print(f"Output file will be: {comp_config.output_file_path}")
+    # Ensure output_dir_cli is an actual directory, not a file path that looks like a dir
+    if os.path.isfile(output_dir_cli):
+        output_dir_cli = os.path.dirname(output_dir_cli)
+    os.makedirs(output_dir_cli, exist_ok=True) # Ensure output directory exists
 
+    final_output_filename = f"compiled.{output_base_name_no_ext}.txt"
+    comp_config.output_file_path = os.path.join(output_dir_cli, final_output_filename)
+    if comp_config.verbose: print(f"Output file will be: {comp_config.output_file_path}")
+
+    # Exclude the script itself if it's run from within the target project_path
     if comp_config.project_path:
         try:
-            cli_module_path = sys.modules[f"{package_name_str}.cli"].__file__
-            if cli_module_path:
-                abs_script_path = os.path.abspath(cli_module_path)
-                if os.path.commonpath(
-                    [abs_script_path,
-                     comp_config.project_path]) == comp_config.project_path:
-                    script_rel_path = os.path.relpath(abs_script_path,
-                                                      comp_config.project_path)
-                    comp_config.additional_path_permanent_exclusions.add(
-                        script_rel_path.replace(os.sep, '/'))
-        except (KeyError, AttributeError, TypeError, ValueError):
+            cli_module_file_path = __import__(f"{package_name_str}.cli", fromlist=['__file__']).__file__
+            if cli_module_file_path:
+                abs_script_path = os.path.abspath(cli_module_file_path)
+                # Check if the script is inside the project_path
+                # comp_config.project_path is already abspath if set
+                if os.path.commonpath([abs_script_path, comp_config.project_path]) == comp_config.project_path:
+                    script_rel_path = os.path.relpath(abs_script_path, comp_config.project_path)
+                    comp_config.additional_path_permanent_exclusions.add(script_rel_path.replace(os.sep, '/'))
+        except (ImportError, AttributeError, TypeError, ValueError):
+            # Fallback for when running as a script (e.g. python codexify/cli.py)
             if sys.argv and sys.argv[0] and sys.argv[0].endswith(".py"):
-                potential_script_path = os.path.abspath(sys.argv[0])
-                if os.path.commonpath(
-                    [potential_script_path,
-                     comp_config.project_path]) == comp_config.project_path:
-                    try:
-                        script_rel_path = os.path.relpath(
-                            potential_script_path, comp_config.project_path)
-                        comp_config.additional_path_permanent_exclusions.add(
-                            script_rel_path.replace(os.sep, '/'))
-                    except ValueError:
-                        pass
+                try:
+                    potential_script_path = os.path.abspath(sys.argv[0])
+                    if comp_config.project_path and os.path.commonpath([potential_script_path, comp_config.project_path]) == comp_config.project_path:
+                        script_rel_path = os.path.relpath(potential_script_path, comp_config.project_path)
+                        comp_config.additional_path_permanent_exclusions.add(script_rel_path.replace(os.sep, '/'))
+                except ValueError: # commonpath might raise if paths are on different drives
+                    pass
+                except Exception: # Catch any other unexpected error
+                    pass
+
 
     if args.save:
-        if args.config:
-            print("Warning: --save option is ignored when --config is used.")
+        if args.config: # --save is ignored if --config is used
+            if comp_config.verbose: print("Warning: --save option is ignored when --config is used.")
         else:
             if not yaml_mod: yaml_mod = ensure_pyyaml_module()
-            print("Processing --save flag...")
-            _save_config_for_cli(args, yaml_mod, output_dir_cli,
-                                 output_base_name_no_ext)
-            print(
-                f"Proceeding with compilation using the current arguments...")
+            if comp_config.verbose: print("Processing --save flag...")
+            _save_config_for_cli(args, yaml_mod, output_dir_cli, output_base_name_no_ext)
+            # The compilation will proceed using the current arguments.
+            if comp_config.verbose: print("Proceeding with compilation using the current arguments...")
 
     result = generate_compiled_output(comp_config)
 
     if result.success:
-        print("\\n" + "-" * 40)
+        print("\n" + "-" * 40)
         if args.save and not args.config:
-            print(f"Configuration saved previously during this run.")
-        print(f"Compilation completed successfully.")
+            # Config saving message is printed by _save_config_for_cli
+            pass
+        print("Compilation completed successfully.")
         if result.output_file_path:
             print(f"Output file: {result.output_file_path}")
         print(f"Included content from {result.files_compiled_count} file(s).")
         if result.files_skipped_count > 0:
-            print(
-                f"Skipped {result.files_skipped_count} file(s) during content processing."
-            )
+            print(f"Skipped {result.files_skipped_count} file(s) during content processing.")
         if result.token_count > 0:
             print(f"Estimated token count (cl100k_base): {result.token_count}")
         else:
-            print("Token count estimation failed or skipped.")
+            print("Token count estimation failed or skipped (no content generated or tiktoken issue).")
         print("-" * 40)
     else:
-        print(f"\\nError during compilation: {result.error_message}")
+        print(f"\nError during compilation: {result.error_message}")
         sys.exit(1)
-
 
 if __name__ == "__main__":
     run_cli()
