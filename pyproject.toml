@@ -1,49 +1,47 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "codexify"
 version = "0.1.0"
-description = "Python CLI & Module to intelligently compile project/code trees into a single text output, ideal for generating context for Large Language Models (LLMs)."
+description = "A code snippet generator for documentation"
 readme = "README.md"
-requires-python = ">=3.8"
-license = {text = "MIT"}
+requires-python = ">=3.7"
+license = { text = "MIT" }
 authors = [
-  {name = "Rémi Viau", email = "remi.viau@gmail.com"},
-]
-keywords = ["llm", "codegen", "context", "compiler", "developer-tools", "python", "cli"]
-classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
-    "Topic :: Software Development :: Build Tools",
-    "Topic :: Software Development :: Compilers",
-    "Topic :: Text Processing",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+  { name = "Rémi Viau", email = "remi.viau@gmail.com" },
 ]
 dependencies = [
-    "PyYAML>=5.0",
-    "tiktoken>=0.3.0",
-    "gitignore-parser>=0.1.0",
+  "click>=7.0",
+  "requests>=2.25.1",
 ]
-
-[project.urls]
-Homepage = "https://github.com/r-via/codexify"
-Repository = "https://github.com/r-via/codexify"
+keywords = ["documentation", "code", "snippets"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.7",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Operating System :: OS Independent",
+]
 
 [project.scripts]
 codexify = "codexify.cli:run_cli"
 
-[tool.setuptools] # Required for include/exclude with setuptools
-packages = ["codexify", "codexify.core"]
-# Or use find directive if you prefer:
-# [tool.setuptools.packages.find]
-# where = ["."]
-# include = ["codexify*"]
-# exclude = ["tests*", "examples*"]
+[project.optional-dependencies]
+dev = [
+  "pytest>=6.0",
+  "black>=22.0",
+  "flake8>=4.0",
+]
+
+[tool.setuptools]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["codexify*"]
+exclude = ["tests*", "examples*"]
