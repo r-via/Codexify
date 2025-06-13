@@ -114,10 +114,10 @@ Codexify defaults to using the `.gitignore` file found at the root of the `--pat
     ```bash
     codexify --path ./my_project --extensions .txt --gitignore ./path/to/another.gitignore
     ```
-*   **Exclude specific directories (in addition to `.gitignore`):**
+*   **Exclude specific directories:**
     Directory names listed here will be excluded even if not in `.gitignore`. Their content will be marked `[Content Omitted]` in the tree.
     ```bash
-    codexify --path ./my_project --extensions .py --exclude node_modules build dist .venv __pycache__
+    codexify --path ./my_project --extensions .py --exclude-dirs node_modules build dist .venv __pycache__
     ```
 *   **Exclude specific files by name:**
     The content of these files will be omitted.
@@ -139,7 +139,7 @@ The tree structure and content of `.go` files from these packages will be added 
 To save your current CLI options to a YAML configuration file for future use:
 
 ```bash
-codexify --path ./my_project --extensions .py .md --exclude .venv --save
+codexify --path ./my_project --extensions .py .md --exclude-dirs .venv --save
 ```
 This will create a file like `config.compiled.my_project.yaml` in the output directory (usually the `--path` directory). Paths within the YAML file will be relative to the YAML file's location.
 
@@ -156,13 +156,19 @@ Once a configuration file is created (manually or via `--save`), you can use it:
 ```bash
 codexify --config ./my_project/config.compiled.my_project.yaml
 ```
-All options from the YAML file will be used. CLI options provided убийc 동시에 with `--config` are generally ignored (except `--save`, which is ignored if `--config` is present).
+All options from the YAML file will be used. However, you can add *additional* exclusions from the command line:
+
+```bash
+# This will use exclusions from the YAML file AND also exclude 'temp_debug.log'
+codexify --config ./my_project/config.compiled.my_project.yaml --exclude-files temp_debug.log
+```
 
 ### Output Options
 
 *   By default, the output file is named `compiled.<parent_folder_name_of_path>.txt` and is placed in the directory specified by `--path`.
 *   If `--output base_name` is used, the output file will be `compiled.base_name.txt`.
 *   If `--output path/to/base_name` is used, the output file will be `path/to/compiled.base_name.txt`. The output directory is then `path/to/`.
+*   The `--output` argument is ignored if `--config` is used (the output name is taken from the YAML file).
 
 ---
 
@@ -237,7 +243,7 @@ packages:
 
 # (Optional) List of directory names to exclude from content compilation.
 # The tree structure will show them as [Content Omitted].
-exclude:
+exclude_dirs:
   - "node_modules"
   - ".venv"
   - "__pycache__"

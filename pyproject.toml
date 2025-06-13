@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codexify"
-version = "0.1.0"
+version = "0.1.1"
 description = "Transform your codebases into intelligent, structured context, perfectly optimized for Large Language Models (LLMs)."
 readme = "README.md"
 requires-python = ">=3.8"
