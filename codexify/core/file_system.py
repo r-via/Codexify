@@ -62,10 +62,12 @@ def load_gitignore(
 # ... (is_likely_binary, get_parent_folder_name, count_contents remain the same)
 def is_likely_binary(file_path: str) -> bool:
     """
-    Checks if a file is likely a binary file.
+    Checks if a file is likely a binary file using a more robust heuristic.
 
-    It reads a small chunk of the file and checks for null bytes or
-    decoding errors with UTF-8, which are common indicators of binary files.
+    It reads a small chunk of the file and checks for two main indicators:
+    1. The presence of null bytes, which is a very strong sign of a binary file.
+    2. A high percentage of non-printable or control characters. Text files,
+       even with encoding issues, are overwhelmingly composed of printable characters.
 
     Args:
         file_path: The path to the file to check.
@@ -76,16 +78,38 @@ def is_likely_binary(file_path: str) -> bool:
     try:
         with open(file_path, "rb") as f:
             chunk = f.read(1024)
-        if b"\x00" in chunk:
+
+        if not chunk:
+            # Empty file is not binary
+            return False
+
+        # 1. Null byte detection is a very reliable and fast check.
+        if b'\x00' in chunk:
             return True
-        chunk.decode("utf-8", errors="strict")
+
+        # 2. Heuristic based on the ratio of non-text characters.
+        #    Define what we consider "text" bytes.
+        #    Includes printable ASCII (32-126) and common whitespace characters.
+        text_bytes = bytes(range(32, 127)) + b'\n\r\t\f\b'
+        
+        non_text_count = 0
+        for byte in chunk:
+            if byte not in text_bytes:
+                non_text_count += 1
+        
+        # If more than 15% of the characters are non-text, it's likely binary.
+        # This threshold allows for some UTF-8 multi-byte characters or minor
+        # encoding glitches without misclassifying the entire file.
+        if non_text_count / len(chunk) > 0.15:
+            return True
+
+        # If it passes both tests, it's very likely a text file.
         return False
-    except UnicodeDecodeError:
+        
+    except Exception:
+        # If we can't even read the file (e.g., permission error),
+        # treat it as binary to be safe.
         return True
-    except (
-        Exception
-    ):  # Catches other potential errors like permission denied during read
-        return True  # Treat as binary if unreadable for safety
 
 
 def get_parent_folder_name(path_str: Optional[str]) -> Optional[str]:
