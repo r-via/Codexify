@@ -90,8 +90,38 @@ def generate_compiled_output(config: CompilationConfig) -> CompilationResult:
             print(f"\n--- Processing Go Packages: {config.go_packages} ---")
             print(f"Permanently excluding from Go package processing: {', '.join(sorted(list(go_perm_excludes)))}")
 
-        project_root_for_go_mod = root_abs_path if root_abs_path and os.path.exists(os.path.join(root_abs_path, 'go.mod')) else os.getcwd()
-        package_locations = get_go_package_locations(config, config.go_packages, project_root_for_go_mod)
+        # --- MODIFICATION START: Improved Go module root detection ---
+        def find_go_mod_root(start_path: str) -> Optional[str]:
+            """
+            Walks up from start_path to find the directory containing go.mod.
+            This mimics Go's own module resolution behavior.
+            """
+            current_path = os.path.abspath(start_path)
+            while True:
+                if os.path.exists(os.path.join(current_path, 'go.mod')):
+                    return current_path
+                parent_path = os.path.dirname(current_path)
+                if parent_path == current_path:  # Reached the filesystem root
+                    return None
+                current_path = parent_path
+
+        # Determine the best directory to run 'go list' from.
+        # Start the search from the project path, or the current working directory if not provided.
+        go_mod_search_start_dir = root_abs_path if root_abs_path and os.path.isdir(root_abs_path) else os.getcwd()
+        go_list_execution_dir = find_go_mod_root(go_mod_search_start_dir)
+
+        if go_list_execution_dir:
+            if config.verbose:
+                print(f"Found 'go.mod' in: {go_list_execution_dir}. This will be the working directory for 'go list'.")
+        else:
+            # Fallback if no go.mod is found.
+            go_list_execution_dir = go_mod_search_start_dir # Use the original start path as a last resort
+            if config.verbose:
+                print(f"Warning: 'go.mod' not found searching upwards from '{go_mod_search_start_dir}'.")
+                print(f"Using fallback directory '{go_list_execution_dir}' for 'go list'. Package resolution might fail for external modules.")
+
+        package_locations = get_go_package_locations(config, config.go_packages, go_list_execution_dir)
+        # --- MODIFICATION END ---
 
         if package_locations:
             for pkg_path, pkg_dir in package_locations.items():
