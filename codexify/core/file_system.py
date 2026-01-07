@@ -1,6 +1,7 @@
 # codexify/core/file_system.py
 import os
 import fnmatch
+import codecs  # <--- Ajout essentiel
 from typing import Optional, Tuple, Set, List, Callable
 
 GitignoreMatcher = Callable[[str], bool]
@@ -8,45 +9,20 @@ ParseGitignoreFuncType = Callable[[str, Optional[str]], GitignoreMatcher]
 
 
 def load_gitignore(
-    gitignore_file_abs_path: Optional[
-        str
-    ],  # Expecting an absolute path to the .gitignore file
+    gitignore_file_abs_path: Optional[str],
     parse_gitignore_func: ParseGitignoreFuncType,
-    base_dir_for_rules_interpretation: Optional[
-        str
-    ],  # The project root for rule interpretation
+    base_dir_for_rules_interpretation: Optional[str],
 ) -> GitignoreMatcher:
     """
     Loads and parses a .gitignore file, returning a callable matcher function.
-
-    The gitignore_file_abs_path is the absolute path to the .gitignore file.
-    The base_dir_for_rules_interpretation is the directory that paths *inside*
-    the .gitignore file are relative to (typically the project root being scanned).
-
-    Args:
-        gitignore_file_abs_path: Absolute path to the .gitignore file.
-        parse_gitignore_func: The function to parse the gitignore file.
-        base_dir_for_rules_interpretation: The directory relative to which gitignore rules
-                                           are applied. This should be the root of the
-                                           directory scan (e.g., config.project_path).
-
-    Returns:
-        A function that takes an absolute file path and returns True if
-        the path matches any ignore rule, False otherwise. If no gitignore
-        file is loaded or found, it returns a function that always returns False.
     """
     if gitignore_file_abs_path:
-        # gitignore_file_abs_path is already absolute as per parameter name
         if os.path.exists(gitignore_file_abs_path):
             try:
-                # base_dir_for_rules_interpretation is crucial.
-                # It tells parse_gitignore where the rules like `/build` or `src/`
-                # should be anchored. This should be the root of the project being scanned.
                 rules_matcher: GitignoreMatcher = parse_gitignore_func(
-                    gitignore_file_abs_path,  # Path to the actual .gitignore file
-                    base_dir_for_rules_interpretation,  # Base for interpreting rules within that file
+                    gitignore_file_abs_path,
+                    base_dir_for_rules_interpretation,
                 )
-                # The matcher returned by parse_gitignore typically expects absolute paths to check.
                 return lambda path_to_check: rules_matcher(
                     os.path.abspath(path_to_check)
                 )
@@ -56,75 +32,54 @@ def load_gitignore(
                 )
         else:
             print(f"Warning: gitignore file '{gitignore_file_abs_path}' not found.")
-    return lambda path_to_check: False  # No gitignore, so ignore nothing
+    return lambda path_to_check: False
 
 
-# ... (is_likely_binary, get_parent_folder_name, count_contents remain the same)
 def is_likely_binary(file_path: str) -> bool:
     """
-    Checks if a file is likely a binary file using a more robust heuristic.
+    Checks if a file is likely binary.
 
-    It reads a small chunk of the file and checks for two main indicators:
-    1. The presence of null bytes, which is a very strong sign of a binary file.
-    2. A high percentage of non-printable or control characters. Text files,
-       even with encoding issues, are overwhelmingly composed of printable characters.
+    This implementation handles multi-byte characters (emojis, box-drawing chars)
+    correctly even if they are split at the chunk boundary.
 
     Args:
         file_path: The path to the file to check.
 
     Returns:
-        True if the file is likely binary, False otherwise.
+        True if the file is likely binary or unreadable, False if it is valid text.
     """
     try:
         with open(file_path, "rb") as f:
             chunk = f.read(1024)
 
         if not chunk:
-            # Empty file is not binary
             return False
 
-        # 1. Null byte detection is a very reliable and fast check.
+        # 1. Null byte detection (standard for binary files)
         if b'\x00' in chunk:
             return True
 
-        # 2. Heuristic based on the ratio of non-text characters.
-        #    Define what we consider "text" bytes.
-        #    Includes printable ASCII (32-126) and common whitespace characters.
-        text_bytes = bytes(range(32, 127)) + b'\n\r\t\f\b'
-        
-        non_text_count = 0
-        for byte in chunk:
-            if byte not in text_bytes:
-                non_text_count += 1
-        
-        # If more than 15% of the characters are non-text, it's likely binary.
-        # This threshold allows for some UTF-8 multi-byte characters or minor
-        # encoding glitches without misclassifying the entire file.
-        if non_text_count / len(chunk) > 0.15:
+        # 2. Incremental UTF-8 Decoding
+        # Instead of chunk.decode('utf-8'), which fails if a character is cut
+        # in half at the end of the 1024 bytes (common with emojis/diagrams),
+        # we use an incremental decoder.
+        # final=False tells the decoder: "If the end is incomplete, wait, don't crash."
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="strict")
+        try:
+            decoder.decode(chunk, final=False)
+            return False
+        except UnicodeDecodeError:
+            # Real decoding error found in the middle of the chunk -> Binary
             return True
 
-        # If it passes both tests, it's very likely a text file.
-        return False
-        
     except Exception:
-        # If we can't even read the file (e.g., permission error),
-        # treat it as binary to be safe.
+        # IO errors or other issues -> Treat as binary to be safe
         return True
 
 
 def get_parent_folder_name(path_str: Optional[str]) -> Optional[str]:
     """
     Extracts the name of the immediate parent folder from a given path string.
-
-    If the path is a directory, its own name is returned. If it's a file,
-    the name of the directory containing it is returned.
-
-    Args:
-        path_str: The file or directory path string.
-
-    Returns:
-        The name of the parent folder, or None if the path is None, empty,
-        or an error occurs.
     """
     if not path_str:
         return None
@@ -134,66 +89,41 @@ def get_parent_folder_name(path_str: Optional[str]) -> Optional[str]:
             return os.path.basename(abs_path)
         else:
             return os.path.basename(os.path.dirname(abs_path))
-    except Exception as e:
-        # Consider logging this if verbose or a dedicated logger is used
-        # print(f"Warning: Could not determine parent folder name for '{str(path_str)}': {e}")
+    except Exception:
         return None
 
 
 def count_contents(start_path: str, permanent_exclusions: Set[str]) -> Tuple[int, int]:
     """
-    Counts the number of subdirectories and files under a given path,
-    respecting permanent exclusions.
-
-    This function is used to report statistics for directories whose
-    content is omitted from the main tree display. It traverses
-    the directory structure, only counting items not matching
-    `permanent_exclusions`.
-
-    Args:
-        start_path: The absolute path to the directory to start counting from.
-        permanent_exclusions: A set of directory or file names/patterns
-                              that should always be excluded from the count.
-
-    Returns:
-        A tuple (dir_count, file_count) representing the number of
-        non-excluded subdirectories and files found.
+    Counts subdirectories and files under a path, respecting permanent exclusions.
     """
     dir_count: int = 0
     file_count: int = 0
-    perm_exclude_set_str: Set[str] = permanent_exclusions  # For clarity
 
     try:
         for _, dirnames, filenames in os.walk(start_path, topdown=True):
             dirs_to_traverse: List[str] = []
             for d_name in dirnames:
-                # Basic name check first, then pattern check
-                if d_name in perm_exclude_set_str or any(
+                if d_name in permanent_exclusions or any(
                     fnmatch.fnmatch(d_name, pat)
-                    for pat in perm_exclude_set_str
+                    for pat in permanent_exclusions
                     if "*" in pat or "?" in pat
                 ):
                     continue
                 dirs_to_traverse.append(d_name)
 
             dir_count += len(dirs_to_traverse)
-            dirnames[:] = (
-                dirs_to_traverse  # Modify dirnames in place to control traversal
-            )
+            dirnames[:] = dirs_to_traverse
 
             for f_name in filenames:
-                if f_name in perm_exclude_set_str or any(
+                if f_name in permanent_exclusions or any(
                     fnmatch.fnmatch(f_name, pat)
-                    for pat in perm_exclude_set_str
+                    for pat in permanent_exclusions
                     if "*" in pat or "?" in pat
                 ):
                     continue
                 file_count += 1
-    except OSError:
-        # print(f"Warning: Could not count contents of '{start_path}' due to an OS error: {e}")
-        pass  # Fail silently for counting if path is inaccessible
     except Exception:
-        # print(f"Warning: An unexpected error occurred while counting contents of '{start_path}': {e_general}")
         pass
 
     return dir_count, file_count
