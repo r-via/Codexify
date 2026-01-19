@@ -5,6 +5,7 @@ from typing import List, Dict, Optional, Tuple, Set, Any
 
 from ..types import CompilationConfig
 from .file_system import is_likely_binary
+from .tree_builder import check_file_matches_search
 
 # TreeDict alias matching tree_builder definition
 TreeDict = Dict[str, Any]
@@ -92,11 +93,16 @@ def assemble_compiled_content(
             if config.exclude_files
             else ""
         )
+        search_filter_desc = (
+            f", search filter: [{', '.join(config.search_keywords)}]"
+            if config.search_keywords
+            else ""
+        )
         permanent_path_excludes_str = ", ".join(sorted(list(path_perm_excludes)))
 
         output_content_parts.append(f"# === Directory Trees ===\n")
         output_content_parts.append(
-            f"# (Options: {gitignore_desc}{user_exclude_dir_desc}{user_exclude_file_desc})\n"
+            f"# (Options: {gitignore_desc}{user_exclude_dir_desc}{user_exclude_file_desc}{search_filter_desc})\n"
         )
         output_content_parts.append(
             f"# (Permanently Excluded: {permanent_path_excludes_str})\n"
@@ -261,6 +267,12 @@ def assemble_compiled_content(
                 pkg = pkg_file_data["package"]
                 rel_path = pkg_file_data["relative_path"]
                 abs_p = pkg_file_data["absolute_path"]
+
+                # Apply search keyword filtering for Go files
+                if config.search_keywords:
+                    filename = os.path.basename(rel_path)
+                    if not check_file_matches_search(abs_p, filename, config.search_keywords):
+                        continue  # Skip files that don't match search criteria
 
                 if pkg != current_pkg:
                     output_content_parts.append(f"# --- Package: {pkg} ---\n\n")

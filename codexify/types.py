@@ -23,6 +23,11 @@ class CompilationConfig:
         go_packages:
             List of Go package import paths (e.g., ["github.com/gin-gonic/gin"])
             whose source code should be resolved and included.
+        search_keywords:
+            List of keywords to filter files by content or filename. Only files
+            containing at least one of these keywords (in their name or content)
+            will be included in the final output. If empty, no search filtering
+            is applied.
         output_file_path:
             Optional absolute or relative path where the compiled text output
             should be saved. If None, the output is not written to disk automatically
@@ -57,6 +62,7 @@ class CompilationConfig:
     project_paths: List[str] = field(default_factory=list)
     extensions: List[str] = field(default_factory=list)
     go_packages: List[str] = field(default_factory=list)
+    search_keywords: List[str] = field(default_factory=list)
     output_file_path: Optional[str] = None
     exclude_dirs: List[str] = field(default_factory=list)
     exclude_files: List[str] = field(default_factory=list)
