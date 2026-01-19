@@ -8,10 +8,52 @@ from .file_system import (
     count_contents,
     ParseGitignoreFuncType,
     GitignoreMatcher,
+    is_likely_binary,
 )
 
 TreeDict = Dict[str, Any]
 FileEntry = Dict[str, Union[str, bool]]
+
+
+def check_file_matches_search(
+    file_path: str, filename: str, keywords: List[str]
+) -> bool:
+    """
+    Check if a file matches search criteria based on filename or content.
+
+    Args:
+        file_path: Absolute path to the file.
+        filename: Name of the file (for filename matching).
+        keywords: List of keywords to search for.
+
+    Returns:
+        True if keywords list is empty OR if any keyword matches filename or content.
+        False otherwise.
+    """
+    if not keywords:
+        return True
+
+    # 1. Check if any keyword is in the filename
+    filename_lower = filename.lower()
+    for kw in keywords:
+        if kw.lower() in filename_lower:
+            return True
+
+    # 2. Check content (skip if binary)
+    if is_likely_binary(file_path):
+        return False
+
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+            content_lower = content.lower()
+            for kw in keywords:
+                if kw.lower() in content_lower:
+                    return True
+    except Exception:
+        return False
+
+    return False
 
 
 def build_filtered_file_list(
@@ -23,6 +65,7 @@ def build_filtered_file_list(
     parse_gitignore_func: ParseGitignoreFuncType,
     permanent_exclusions: Set[str],
     config_pattern_yaml_local: str,
+    search_keywords: Optional[List[str]] = None,
 ) -> List[str]:
     """
     Builds a sorted list of relative file paths to be included for content compilation.
@@ -106,6 +149,11 @@ def build_filtered_file_list(
                 matched = True
 
             if matched:
+                # Apply search keyword filtering if specified
+                if search_keywords:
+                    if not check_file_matches_search(full_path, filename_str, search_keywords):
+                        continue  # File doesn't match search criteria, skip it
+
                 rel_path_intermediate = (
                     os.path.join(rel_dirpath, filename_str)
                     if rel_dirpath != "."
@@ -126,6 +174,7 @@ def build_tree_structure(
     user_exclude_dirs: List[str],
     user_exclude_files: List[str],
     extensions_for_content: List[str],
+    search_keywords: Optional[List[str]] = None,
 ) -> TreeDict:
     """
     Builds a nested dictionary representing the directory tree structure.
@@ -298,10 +347,22 @@ def build_tree_structure(
                 if not content_matched_by_extension:
                     is_content_omitted_by_extension_rule = True
 
+            # Check search keyword filtering
+            # Only check if file is not already omitted by other rules
+            is_content_omitted_by_search: bool = False
+            if search_keywords and not (
+                is_content_omitted_by_user_rule
+                or is_content_omitted_by_gitignore
+                or is_content_omitted_by_extension_rule
+            ):
+                if not check_file_matches_search(full_path, filename_str, search_keywords):
+                    is_content_omitted_by_search = True
+
             is_content_omitted: bool = (
                 is_content_omitted_by_user_rule
                 or is_content_omitted_by_gitignore
                 or is_content_omitted_by_extension_rule
+                or is_content_omitted_by_search
             )
             files_in_node.append({"name": filename_str, "omitted": is_content_omitted})
 

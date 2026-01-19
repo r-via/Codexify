@@ -115,10 +115,16 @@ def _load_config_from_yaml_for_cli(
         else:
             output_base_no_ext = default_output_base_no_ext
 
+        # --- Resolve Search Keywords ---
+        search_keywords = loaded_config.get("search", [])
+        if isinstance(search_keywords, str):
+            search_keywords = [search_keywords]
+
         return {
             "project_paths": resolved_project_paths,
             "extensions": loaded_config.get("extensions", []),
             "go_packages": loaded_config.get("packages", []),
+            "search_keywords": search_keywords,
             "output_base_name_no_ext": output_base_no_ext,
             "exclude_dirs": loaded_config.get("exclude_dirs", []),
             "exclude_files": loaded_config.get("exclude_files", []),
@@ -220,6 +226,7 @@ def _save_config_for_cli(
     config_data["extensions"] = args.extensions if args.extensions else []
     config_data["output"] = output_base_name_no_ext_for_yaml
     config_data["packages"] = args.packages if args.packages else []
+    config_data["search"] = args.search if args.search else []
     config_data["exclude_dirs"] = args.exclude_dirs if args.exclude_dirs else []
     config_data["exclude_files"] = args.exclude_files if args.exclude_files else []
     config_data["gitignore"] = gitignore_in_yaml
@@ -310,6 +317,12 @@ def run_cli():
         help="Path to a .gitignore file. Ignored if --config is used.",
     )
     parser.add_argument(
+        "--search",
+        nargs="+",
+        default=[],
+        help="Keywords to filter files by content or filename. Only files containing at least one keyword will be included.",
+    )
+    parser.add_argument(
         "-q",
         "--quiet",
         action="store_true",
@@ -362,6 +375,11 @@ def run_cli():
         yaml_exclude_files.update(args.exclude_files)
         comp_config.exclude_files = sorted(list(yaml_exclude_files))
 
+        # Merge CLI search keywords with Config search keywords
+        yaml_search = set(cli_loaded_yaml_config.get("search_keywords", []))
+        yaml_search.update(args.search)
+        comp_config.search_keywords = sorted(list(yaml_search))
+
         output_base_name_no_ext = cli_loaded_yaml_config["output_base_name_no_ext"]
         output_dir_cli = cli_loaded_yaml_config["config_source_dir"]
 
@@ -386,6 +404,7 @@ def run_cli():
 
         comp_config.extensions = args.extensions if args.extensions else []
         comp_config.go_packages = args.packages if args.packages else []
+        comp_config.search_keywords = args.search if args.search else []
         comp_config.exclude_dirs = args.exclude_dirs
         comp_config.exclude_files = args.exclude_files
 

@@ -91,6 +91,7 @@ def generate_compiled_output(config: CompilationConfig) -> CompilationResult:
                 config.exclude_dirs,
                 config.exclude_files,
                 config.extensions,
+                config.search_keywords,
             )
 
             # Build Filtered File List (relative paths)
@@ -103,6 +104,7 @@ def generate_compiled_output(config: CompilationConfig) -> CompilationResult:
                 effective_parse_git_func,
                 path_perm_excludes,
                 CONFIG_FILE_PATTERN,
+                config.search_keywords,
             )
 
             # Generate Tree String Representation
@@ -176,6 +178,7 @@ def generate_compiled_output(config: CompilationConfig) -> CompilationResult:
                     [],
                     [],
                     [".go"],
+                    config.search_keywords,
                 )
                 package_trees_map[pkg_path] = pkg_tree
                 package_tree_lines_map[pkg_path] = print_tree(
